@@ -298,7 +298,7 @@ int main(int argc, char* argv[])
     emscripten_get_canvas_element_size("#canvas", &fb_w, &fb_h);
     #endif
 
-    const char* window_name = "App";
+    const char* window_name = APP_NAME;
     auto window_flags = SDL_WINDOW_OPENGL | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED;
 
     window = SDL_CreateWindow(window_name, fb_w, fb_h, window_flags);

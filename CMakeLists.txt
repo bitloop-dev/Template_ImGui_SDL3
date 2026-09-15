@@ -22,6 +22,7 @@ add_executable(${APP}
 
 target_compile_features(${APP} PRIVATE cxx_std_23)
 target_include_directories(${APP} PRIVATE ${APP_INCLUDE_DIR})
+target_compile_definitions(${APP} PRIVATE APP_NAME="${APP}")
 
 find_package(Freetype CONFIG REQUIRED)
 find_package(SDL3 CONFIG REQUIRED)
