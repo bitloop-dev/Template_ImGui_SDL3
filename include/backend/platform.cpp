@@ -1,6 +1,9 @@
 //#include <bitloop/core/config.h>
 //#include <bitloop/core/project.h>
 #include "platform.h"
+#include <algorithm>
+#include <cmath>
+#include <stdexcept>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -87,7 +90,7 @@ void PlatformManager::init()
     EM_ASM({
         window.addEventListener('keydown', function(event)
         {
-            if (event.ctrlKey && event.key == 'v')
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() == 'v')
                 event.stopImmediatePropagation();
         }, true);
         });
@@ -98,7 +101,8 @@ void PlatformManager::update()
 {
     SDL_GetWindowSizeInPixels(window, &gl_w, &gl_h);
     SDL_GetWindowSize(window, &win_w, &win_h);
-    win_dpr = SDL_GetWindowDisplayScale(window);
+    // UI uses window coordinates; framebuffer density is handled by ImGui's backend.
+    win_dpr = SDL_GetWindowDisplayScale(window) / SDL_GetWindowPixelDensity(window);
 }
 
 void PlatformManager::resized()
@@ -206,7 +210,7 @@ bool PlatformManager::isMobile() const
 
 bool PlatformManager::isDesktopNative() const
 {
-    #if defined BL_WEB_BUILD
+    #if defined __EMSCRIPTEN__
     return false;
     #else
     return !isMobile();

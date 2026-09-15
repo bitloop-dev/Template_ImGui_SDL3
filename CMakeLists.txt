@@ -25,7 +25,6 @@ target_include_directories(${APP} PRIVATE ${APP_INCLUDE_DIR})
 
 find_package(Freetype CONFIG REQUIRED)
 find_package(SDL3 CONFIG REQUIRED)
-find_package(glad CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(NanoSVG CONFIG REQUIRED)
 find_package(WebP CONFIG REQUIRED)
@@ -34,7 +33,6 @@ find_package(Stb REQUIRED)
 target_link_libraries(${APP} PRIVATE 
     Freetype::Freetype
     SDL3::SDL3
-    glad::glad
     imgui::imgui
     NanoSVG::nanosvg NanoSVG::nanosvgrast
     WebP::webpdemux
@@ -42,65 +40,61 @@ target_link_libraries(${APP} PRIVATE
 
 target_include_directories(${APP} PRIVATE ${Stb_INCLUDE_DIR})
 
-add_custom_command(TARGET ${APP} PRE_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_CURRENT_SOURCE_DIR}/data"
-        "$<TARGET_FILE_DIR:${APP}>/data"
-)
+if (NOT EMSCRIPTEN)
+    find_package(glad CONFIG REQUIRED)
+    target_link_libraries(${APP} PRIVATE glad::glad)
+    add_custom_target(app_data
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/data"
+            "$<TARGET_FILE_DIR:${APP}>/data"
+        VERBATIM
+    )
+    add_dependencies(${APP} app_data)
+endif()
 
-if (MSVC)
-	set_target_properties(${APP} PROPERTIES WIN32_EXECUTABLE TRUE)
-elseif (EMSCRIPTEN)
-	set(APP_DATA_DIR "${CMAKE_BINARY_DIR}/app/data")
-	message(STATUS "APP_DATA_DIR: ${APP_DATA_DIR}")
-	
-	target_link_options(${APP} PRIVATE "--embed-file=${CMAKE_BINARY_DIR}/data@/data")
-	target_link_options(${APP} PRIVATE "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/static/shell.html")
-	
-	set_target_properties(${APP} PROPERTIES
-		OUTPUT_NAME "index"
-		SUFFIX ".html"
-	)
+if (WIN32)
+    set_target_properties(${APP} PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()
 
 if (MSVC)
-	target_compile_options(${APP} PRIVATE /MP) # Multi-threaded compilation
-	target_compile_options(${APP} PRIVATE /permissive- /W3 /WX /utf-8 /D_CRT_SECURE_NO_WARNINGS)
-elseif (EMSCRIPTEN)
-	# O3 for WASM
-	target_compile_options(${APP} PRIVATE 
-		-O3
-		-sUSE_PTHREADS=1
-		-pthread
-		-matomics
-		-mbulk-memory
+    target_compile_options(${APP} PRIVATE /permissive- /W3 /WX /utf-8 /D_CRT_SECURE_NO_WARNINGS)
+endif()
 
-		$<$<CONFIG:RelWithDebInfo>:-g2> # keep DWARF + names in release
-		$<$<CONFIG:RelWithDebInfo>:-ffunction-sections>
-		$<$<CONFIG:RelWithDebInfo>:-fdata-sections>
-	)
+if (EMSCRIPTEN)
+    target_compile_options(${APP} PRIVATE
+        -O3
+        -pthread
+        -matomics
+        -mbulk-memory
 
-	target_link_options(${APP} PRIVATE
-		-sUSE_SDL=3
-		-sUSE_WEBGL2=1
-		-sFULL_ES3=1
-		-sALLOW_MEMORY_GROWTH=1
-		-sUSE_PTHREADS=1
-		-sPTHREAD_POOL_SIZE_STRICT=0
-		-sPTHREAD_POOL_SIZE=32
-		-sPTHREADS_DEBUG=1
-		-sEXPORTED_RUNTIME_METHODS=[ccall,UTF8ToString,stringToUTF8,lengthBytesUTF8]
+        $<$<CONFIG:RelWithDebInfo>:-g2>
+        $<$<CONFIG:RelWithDebInfo>:-ffunction-sections>
+        $<$<CONFIG:RelWithDebInfo>:-fdata-sections>
+        $<$<CONFIG:RelWithDebInfo>:-flto>
+    )
 
-		# Prefer this OFF in Release (it bloats logs/binary)
-		-sPTHREADS_DEBUG=0
+    file(GLOB_RECURSE APP_ASSETS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/data/*")
 
-		# Names + demangling for analysis
-		$<$<CONFIG:RelWithDebInfo>:--profiling-funcs>
+    set_property(TARGET ${APP} APPEND PROPERTY LINK_DEPENDS
+        ${APP_ASSETS} "${CMAKE_CURRENT_SOURCE_DIR}/static/shell.html")
+    set_target_properties(${APP} PROPERTIES OUTPUT_NAME "index" SUFFIX ".html")
 
-		# GC unreferenced sections
-		$<$<CONFIG:RelWithDebInfo>:-Wl>
-		$<$<CONFIG:RelWithDebInfo>:--gc-sections>
-		$<$<CONFIG:RelWithDebInfo>:-flto>
-		$<$<CONFIG:RelWithDebInfo>:-sASSERTIONS>
-	)
+    target_link_options(${APP} PRIVATE
+        -pthread
+        -sFULL_ES3=1
+        -sPTHREAD_POOL_SIZE=32
+        -sPTHREAD_POOL_SIZE_STRICT=0
+        -sPTHREADS_DEBUG=0
+        "--embed-file=${CMAKE_CURRENT_SOURCE_DIR}/data@/data"
+        "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/static/shell.html"
+        -sMIN_WEBGL_VERSION=2
+        -sMAX_WEBGL_VERSION=2
+        -sALLOW_MEMORY_GROWTH=1
+        "-sEXPORTED_RUNTIME_METHODS=['ccall','UTF8ToString','stringToUTF8','lengthBytesUTF8']"
+
+        $<$<CONFIG:RelWithDebInfo>:--profiling-funcs>
+        $<$<CONFIG:RelWithDebInfo>:-Wl,--gc-sections>
+        $<$<CONFIG:RelWithDebInfo>:-flto>
+        $<$<CONFIG:RelWithDebInfo>:-sASSERTIONS>
+    )
 endif()

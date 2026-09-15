@@ -3,8 +3,13 @@
   "name": "app",
   "version-string": "0.1.0",
   "dependencies": [
-    "glad",
-    "sdl3",
+    { "name": "glad", "platform": "!emscripten" },
+    { "name": "sdl3", "platform": "!emscripten" },
+    {
+      "name": "sdl3",
+      "platform": "emscripten",
+      "features": ["emscripten-pthreads"]
+    },
     "freetype",
     "nanosvg",
     "libwebp",

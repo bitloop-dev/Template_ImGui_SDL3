@@ -1,5 +1,6 @@
 #include <thread>
 #include <cmath>
+#include <memory>
 #include <imgui.h>
 
 /// SDL3
@@ -46,6 +47,8 @@ ImFont* mono_font = nullptr;
 bool simulated_imgui_paste = false;
 #endif
 
+void checkChangedDPR();
+
 void gui_loop()
 {
     // ======== Poll SDL events ========
@@ -76,11 +79,9 @@ void gui_loop()
     }
 
     // ======== Prepare frame ========
+    checkChangedDPR();
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
-
-    ImGui::GetIO().DisplaySize = ImVec2((float)platform()->fboWidth(), (float)platform()->fboHeight());
-    ImGui::GetIO().DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
 
     ImGui::NewFrame();
 
@@ -100,7 +101,7 @@ void gui_loop()
     // Release simulated paste keys
     if (simulated_imgui_paste) {
         simulated_imgui_paste = false;
-        ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
+        ImGui::GetIO().AddKeyEvent(ImGui::GetIO().ConfigMacOSXBehaviors ? ImGuiMod_Super : ImGuiMod_Ctrl, false);
         ImGui::GetIO().AddKeyEvent(ImGuiKey_V, false);
     }
     #endif
@@ -113,7 +114,6 @@ void gui_loop()
 
 #ifdef __EMSCRIPTEN__
 std::string clipboard_content;  // this stores the content for our internal clipboard
-bool simulatedImguiPaste = false;
 
 char const* get_content_for_imgui(ImGuiContext*)
 {
@@ -130,7 +130,7 @@ void set_content_from_imgui(ImGuiContext*, char const* text)
 void clipboard_paste_callback(std::string&& paste_data, void* callback_data)
 {
     clipboard_content = std::move(paste_data);
-    ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+    ImGui::GetIO().AddKeyEvent(ImGui::GetIO().ConfigMacOSXBehaviors ? ImGuiMod_Super : ImGuiMod_Ctrl, true);
     ImGui::GetIO().AddKeyEvent(ImGuiKey_V, true);
     simulated_imgui_paste = true;
 }
@@ -139,6 +139,7 @@ void clipboard_paste_callback(std::string&& paste_data, void* callback_data)
 void initStyles()
 {
     ImGuiStyle& style = ImGui::GetStyle();
+    style = ImGuiStyle();
 
     // base sizes
     style.WindowRounding = 8.0f;
@@ -265,13 +266,26 @@ void init_window()
 
 int main(int argc, char* argv[])
 {
-    SDL_Init(SDL_INIT_VIDEO);
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        SDL_Log("SDL_Init failed: %s", SDL_GetError());
+        return 1;
+    }
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 0);
 
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    #ifdef __EMSCRIPTEN__
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+    const char* glsl_version = "#version 300 es";
+    #else
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+    const char* glsl_version = "#version 150";
+    #ifdef __APPLE__
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
+    #endif
+    #endif
 
     SDL_SetEventEnabled(SDL_EVENT_DROP_FILE, true);
     SDL_SetEventEnabled(SDL_EVENT_DROP_TEXT, true);
@@ -289,8 +303,13 @@ int main(int argc, char* argv[])
 
     window = SDL_CreateWindow(window_name, fb_w, fb_h, window_flags);
 
-    if (!window)
+    if (!window) {
+        SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
+        SDL_Quit();
         return 1;
+    }
+
+    auto _platform_manager = std::make_unique<PlatformManager>(window);
 
     // Set icon
     std::string icon_path = platform()->path("/data/icon/app.png");
@@ -298,8 +317,11 @@ int main(int argc, char* argv[])
     unsigned char* icon_rgba = stbi_load(icon_path.c_str(), &w, &h, &comp, 4);
     if (icon_rgba) {
         SDL_Surface* icon = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_RGBA32, icon_rgba, w * 4);
-        SDL_SetWindowIcon(window, icon);
-        SDL_DestroySurface(icon);
+        if (icon) {
+            SDL_SetWindowIcon(window, icon);
+            SDL_DestroySurface(icon);
+        }
+        stbi_image_free(icon_rgba);
     }
 
     SDL_GLContext gl_context = nullptr;
@@ -307,14 +329,23 @@ int main(int argc, char* argv[])
     // ======== OpenGL setup ========
     {
         gl_context = SDL_GL_CreateContext(window);
-        SDL_GL_MakeCurrent(window, gl_context);
+        if (!gl_context || !SDL_GL_MakeCurrent(window, gl_context)) {
+            SDL_Log("OpenGL context initialization failed: %s", SDL_GetError());
+            if (gl_context) SDL_GL_DestroyContext(gl_context);
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return 1;
+        }
 
         //SDL_GL_SetSwapInterval(1); // enforces 60fps / v-sync
         SDL_GL_SetSwapInterval(0);
 
         #ifndef __EMSCRIPTEN__
         if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
-            //blPrint() << "Failed to initialize GLAD\n";
+            SDL_Log("Failed to initialize GLAD");
+            SDL_GL_DestroyContext(gl_context);
+            SDL_DestroyWindow(window);
+            SDL_Quit();
             return 1;
         }
 
@@ -325,7 +356,6 @@ int main(int argc, char* argv[])
 
     // Begin application lifecycle
     {
-        auto _platform_manager = std::make_unique<PlatformManager>(window);
         auto _app = std::make_unique<App>();
 
         // ======== ImGui setup ========
@@ -334,9 +364,12 @@ int main(int argc, char* argv[])
             ImGui::CreateContext();
             //ImPlot::CreateContext();
             ImGui_ImplSDL3_InitForOpenGL(window, gl_context);
-            ImGui_ImplOpenGL3_Init();
+            ImGui_ImplOpenGL3_Init(glsl_version);
 
             #ifdef __EMSCRIPTEN__
+            ImGui::GetIO().ConfigMacOSXBehaviors = EM_ASM_INT({
+                return /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? 1 : 0;
+            }) != 0;
             emscripten_browser_clipboard::paste(clipboard_paste_callback);
 
             ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
@@ -346,6 +379,7 @@ int main(int argc, char* argv[])
         }
 
         platform()->init();
+        platform()->resized();
         init_window();
         app()->onStartup();
 

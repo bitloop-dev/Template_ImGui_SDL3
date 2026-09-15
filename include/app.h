@@ -7,7 +7,10 @@ class App
 
 public:
 
-    static constexpr App* instance() {
+    App() { singleton = this; }
+    ~App() { singleton = nullptr; }
+
+    static App* instance() {
         return singleton;
     }
 
@@ -17,7 +20,7 @@ public:
     void onEvent(SDL_Event e);
 };
 
-[[nodiscard]] constexpr App* app()
+[[nodiscard]] inline App* app()
 {
     return App::instance();
 }

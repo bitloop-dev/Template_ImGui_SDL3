@@ -66,7 +66,7 @@ class PlatformManager
 
 public:
 
-    static constexpr PlatformManager* instance()
+    static PlatformManager* instance()
     {
         return singleton;
     }
@@ -131,7 +131,7 @@ public:
     [[nodiscard]] std::string path(std::string_view virtual_path) const;
 };
 
-[[nodiscard]] constexpr PlatformManager* platform()
+[[nodiscard]] inline PlatformManager* platform()
 {
     return PlatformManager::instance();
 }
